@@ -73,12 +73,7 @@ fn load_vcs_files() -> Result<Vec<PathBuf>> {
         .current_dir(load_repo_root()?)
         .output()
         .context("couldn't load VCS tracked files")?;
-    let mut output = String::from_utf8(tracked_files.stdout)?;
-    let changed_files = Command::new("git")
-        .arg("diff")
-        .arg("--name-only")
-        .output()?;
-    output.push_str(std::str::from_utf8(changed_files.stdout.as_slice())?);
+    let output = String::from_utf8(tracked_files.stdout)?;
     let files = output
         .lines()
         .map(|line| PathBuf::from(line.trim().to_string()));
