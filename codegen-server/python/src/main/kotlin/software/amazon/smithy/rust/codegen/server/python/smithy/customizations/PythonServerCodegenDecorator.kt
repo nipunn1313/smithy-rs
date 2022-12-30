@@ -96,6 +96,7 @@ class PubUsePythonTypesDecorator : ServerCodegenDecorator {
 /**
  * Generates `pyproject.toml` for the crate.
  *  - Configures Maturin as the build system
+ *  - Configures Python source directory
  */
 class PyProjectTomlDecorator : ServerCodegenDecorator {
     override val name: String = "PyProjectTomlDecorator"
@@ -108,8 +109,67 @@ class PyProjectTomlDecorator : ServerCodegenDecorator {
                     "requires" to listOfNotNull("maturin>=0.14,<0.15"),
                     "build-backend" to "maturin",
                 ).toMap(),
+                "tool" to listOfNotNull(
+                    "maturin" to listOfNotNull(
+                        "python-source" to "python"
+                    ).toMap(),
+                ).toMap()
             )
             writeWithNoFormatting(TomlWriter().write(config))
+        }
+    }
+}
+
+/**
+ * Generates `__init__.py` for the Python source.
+ *
+ * This file allows Python module to be imported like:
+ * ```
+ * import pokemon_service_server_sdk
+ * pokemon_service_server_sdk.App()
+ * ```
+ * instead of:
+ * ```
+ * from pokemon_service_server_sdk import pokemon_service_server_sdk
+ * ```
+ */
+class InitPyDecorator : ServerCodegenDecorator {
+    override val name: String = "InitPyDecorator"
+    override val order: Byte = 0
+
+    override fun extras(codegenContext: ServerCodegenContext, rustCrate: RustCrate) {
+        val libName = codegenContext.settings.moduleName.toSnakeCase()
+
+        rustCrate.withFile("python/$libName/__init__.py") {
+            writeWithNoFormatting(
+                """
+from .$libName import *
+
+__doc__ = $libName.__doc__
+if hasattr($libName, "__all__"):
+    __all__ = $libName.__all__
+                """.trimIndent()
+            )
+        }
+    }
+}
+
+/**
+ * Generates `py.typed` for the Python source.
+ *
+ * This marker file is required to be PEP 561 compliant stub package.
+ * Type definitions will be ignored by `mypy` if the package is not PEP 561 compliant:
+ * https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-library-stubs-or-py-typed-marker
+ */
+class PyTypedMarkerDecorator : ServerCodegenDecorator {
+    override val name: String = "PyTypedMarkerDecorator"
+    override val order: Byte = 0
+
+    override fun extras(codegenContext: ServerCodegenContext, rustCrate: RustCrate) {
+        val libName = codegenContext.settings.moduleName.toSnakeCase()
+
+        rustCrate.withFile("python/$libName/py.typed") {
+            writeWithNoFormatting("")
         }
     }
 }
@@ -128,4 +188,8 @@ val DECORATORS = listOf(
     PythonExportModuleDecorator(),
     // Generate `pyproject.toml` for the crate.
     PyProjectTomlDecorator(),
+    // Generate `__init__.py` for the Python source.
+    InitPyDecorator(),
+    // Generate `py.typed` for the Python source.
+    PyTypedMarkerDecorator(),
 )
