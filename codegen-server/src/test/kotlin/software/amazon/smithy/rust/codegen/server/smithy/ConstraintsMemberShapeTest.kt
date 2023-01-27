@@ -32,8 +32,8 @@ class ConstraintsMemberShapeTest {
 
         structure WeatherInput {
             coord : Coordinate,
-            @length(max: 200)
-            cityName: String
+            @length(max: 50)
+            cityName: Name
         }
         
         structure WeatherOutput {
@@ -69,6 +69,11 @@ class ConstraintsMemberShapeTest {
         
         integer FeelsLikeCentigrade
         float Centigrade
+        
+        @pattern("^[A-Za-z]+${'$'}")
+        @length(max: 500)
+        string Name
+        
         @range(min: -100, max: 200)
         float Fahrenheit
     """.asSmithyModel()
@@ -96,6 +101,10 @@ class ConstraintsMemberShapeTest {
     @Test
     fun `transform model and check all constraints on member shape have been changed`() {
         val model = RefactorConstrainedMemberType.transform(baseModel)
+//        val shape = model.expectShape(ShapeId.from("weather#RefactoredWeatherInputCityName"))
+//        println(shape)
+//
+//        shape.allTraits.forEach{ println(it) }
 
         checkMemberShapeChanged(model, baseModel, "weather#WeatherOutput\$degree")
         checkMemberShapeChanged(model, baseModel, "weather#WeatherOutput\$city")
@@ -114,11 +123,11 @@ class ConstraintsMemberShapeTest {
         // Ensure data trait remained on the member shape in the transformed model.
         checkShapeHasTrait(model, baseModel, "weather#WeatherOutput\$historicData", "aws.api#data")
 
-        //val serializer: ModelSerializer = ModelSerializer.builder().build()
-        //val json = Node.prettyPrintJson(serializer.serialize(model))
-        //File("output.txt").printWriter().use {
-        //    it.println(json)
-        //}
+        val serializer: ModelSerializer = ModelSerializer.builder().build()
+        val json = Node.prettyPrintJson(serializer.serialize(model))
+        File("output.txt").printWriter().use {
+            it.println(json)
+        }
     }
 
     /**
@@ -238,14 +247,52 @@ class ConstraintsMemberShapeTest {
 
     @Test
     fun `generate code for a small struct with member shape`() {
+        val codeGenModel = """
+            namespace com.aws.example.rust
+            
+            use aws.protocols#restJson1
+            
+            /// The Pokémon Service allows you to retrieve information about Pokémon species.
+            @title("Pokémon Service")
+            @restJson1
+            service PokemonService {
+                version: "2021-12-01",
+                operations: [
+                    Dummy
+                ],
+            }
+            
+            @http(uri: "/pokemon-species", method: "POST")
+            operation Dummy {
+                input : DummyInput
+            }
+            
+            structure DummyInput {
+                @range(min: -10, max:10)
+                degree : Centigrade
+            }
+            
+            integer Centigrade
+            """.asSmithyModel()
+
         val runtimeConfig =
             RuntimeConfig(runtimeCrateLocation = RuntimeCrateLocation.Path(File("../../rust-runtime").absolutePath))
 
-        val (context, _testDir) = generatePluginContext(baseModel, runtimeConfig = runtimeConfig)
+        val (context, _testDir) = generatePluginContext(codeGenModel, runtimeConfig = runtimeConfig, overrideTestDir = File("/Users/fahadzub/workplace/baykar/smithy"))
         val codegenDecorator: CombinedServerCodegenDecorator =
             CombinedServerCodegenDecorator.fromClasspath(context)
+
         ServerCodegenVisitor(context, codegenDecorator)
             .execute()
+
+        val modelToSerialize = context.model
+        val serializer: ModelSerializer = ModelSerializer.builder().build()
+        val json = Node.prettyPrintJson(serializer.serialize(modelToSerialize))
+        File("/Users/fahadzub/workplace/baykar/smithy/model.json").printWriter().use {
+            it.println(json)
+        }
+
+        println("Check $_testDir, that should have the code in it")
     }
 
     /**

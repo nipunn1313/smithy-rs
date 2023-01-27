@@ -29,7 +29,7 @@ object RefactorConstrainedMemberType {
      * non-constrained member shapes.
      */
     fun transform(model: Model): Model {
-        val existingRefactoredNamed = HashSet<ShapeId>()
+        val existingRefactoredNames = HashSet<ShapeId>()
 
         val transformations = model.operationShapes
             .flatMap { operation ->
@@ -43,7 +43,7 @@ object RefactorConstrainedMemberType {
             .filterIsInstance(StructureShape::class.java)
             .flatMap {
                 it.constrainedMembers()
-            }.mapNotNull { it.makeNonConstrained(model, existingRefactoredNamed) }
+            }.mapNotNull { it.makeNonConstrained(model, existingRefactoredNames) }
 
         return applyTransformations(model, transformations)
     }
@@ -91,7 +91,7 @@ object RefactorConstrainedMemberType {
      */
     private fun refactoredShapeId(
         model: Model,
-        existingRefactoredNamed: MutableSet<ShapeId>,
+        existingRefactoredNames: MutableSet<ShapeId>,
         memberShape: ShapeId,
     ): ShapeId {
         val structName = memberShape.name
@@ -102,7 +102,7 @@ object RefactorConstrainedMemberType {
             ShapeId.from("${memberShape.namespace}#Refactored${structName}${memberName}$suffix")
 
         fun structNameIsUnique(newName: ShapeId) =
-            model.getShape(newName).isEmpty && !existingRefactoredNamed.contains(newName)
+            model.getShape(newName).isEmpty && !existingRefactoredNames.contains(newName)
 
         fun generateUniqueName(): ShapeId {
             // Ensure the name does not already exist in the model, else make it unique
@@ -134,7 +134,7 @@ object RefactorConstrainedMemberType {
         }
 
         val newName = generateUniqueName()
-        existingRefactoredNamed.add(newName)
+        existingRefactoredNames.add(newName)
         return newName
     }
 
@@ -144,7 +144,7 @@ object RefactorConstrainedMemberType {
      */
     private fun MemberShape.makeNonConstrained(
         model: Model,
-        existingRefactoredNamed: MutableSet<ShapeId>,
+        existingRefactoredNames: MutableSet<ShapeId>,
     ): MemberTransformation? {
         val (constrainedTraits, otherTraits) = this.allTraits.values
             .partition {
@@ -165,12 +165,19 @@ object RefactorConstrainedMemberType {
             when (val builder = targetShape.toBuilder()) {
                 is AbstractShapeBuilder<*, *> -> {
                     // Use the target builder to create a new standalone shape that would
-                    // be added to the model later on. Put all the constraint traits that
-                    // were on the member shape onto the new shape, and also apply the
-                    // RefactoredMemberTrait on the new shape.
-                    val shapeId = refactoredShapeId(model, existingRefactoredNamed, this.id)
+                    // be added to the model later on. Keep all existing traits on the target
+                    // but replace the ones that are overriden on the member shape
+                    val existingNonOverridenTraits =
+                        builder.allTraits.values.filter { existingTrait ->
+                            !constrainedTraits.any { it.toShapeId() == existingTrait.toShapeId() }
+                        }
+
+                    val newTraits = existingNonOverridenTraits + constrainedTraits + RefactoredStructureTrait(this.id)
+
+                    // Create a new standalone type that would be added to the model later on
+                    val shapeId = refactoredShapeId(model, existingRefactoredNames, this.id)
                     val standaloneShape = builder.id(shapeId)
-                        .traits(constrainedTraits + RefactoredStructureTrait(this.id))
+                        .traits(newTraits)
                         .build()
 
                     // Since the new shape has not been added to the model as yet, the current
